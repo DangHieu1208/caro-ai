@@ -1,14 +1,108 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
 @layer base {
   :root {
-    --background: 210 33% 98%; --foreground: 222 47% 13%; --card: 0 0% 100%; --card-foreground: 222 47% 13%;
-    --primary: 222 47% 16%; --primary-foreground: 0 0% 100%; --secondary: 215 23% 94%; --secondary-foreground: 222 47% 16%;
-    --muted: 215 23% 95%; --muted-foreground: 215 16% 43%; --accent: 215 24% 94%; --accent-foreground: 222 47% 13%;
-    --border: 214 24% 88%; --input: 214 24% 85%; --ring: 218 75% 52%; --radius: .75rem;
+    color-scheme: light;
+
+    --background: 220 20% 97%;
+    --foreground: 222 24% 13%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 24% 13%;
+
+    --primary: 222 35% 19%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 17% 94%;
+    --secondary-foreground: 222 24% 15%;
+
+    --muted: 220 16% 95%;
+    --muted-foreground: 218 12% 42%;
+
+    --accent: 220 18% 93%;
+    --accent-foreground: 222 24% 13%;
+
+    --border: 220 16% 89%;
+    --input: 220 16% 85%;
+    --ring: 221 70% 48%;
+
+    --radius: 0.875rem;
   }
-  * { @apply border-border; }
-  body { @apply bg-background text-foreground antialiased; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-  button, select, input { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2; }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    min-width: 320px;
+    margin: 0;
+  }
+
+  button,
+  select,
+  input {
+    @apply focus-visible:outline-none;
+    @apply focus-visible:ring-2;
+    @apply focus-visible:ring-ring;
+    @apply focus-visible:ring-offset-2;
+  }
+
+  button:disabled,
+  select:disabled,
+  input:disabled {
+    cursor: not-allowed;
+  }
+
+  ::selection {
+    background: #dbeafe;
+    color: #172554;
+  }
+}
+
+@layer components {
+  .lab-panel {
+    @apply border bg-card shadow-sm;
+  }
+
+  .lab-control {
+    @apply h-10 w-full rounded-md border border-input;
+    @apply bg-card px-3 text-sm transition-colors;
+    @apply hover:border-slate-400 disabled:opacity-50;
+  }
+
+  .lab-cell {
+    @apply relative grid aspect-square min-w-0 place-items-center;
+    @apply border-b border-r border-slate-200 bg-card;
+    @apply transition-colors enabled:hover:bg-blue-50;
+  }
+
+  .lab-cell:focus-visible {
+    @apply z-10 ring-inset ring-offset-0;
+  }
+
+  .lab-cell-last {
+    @apply bg-blue-50;
+  }
+
+  .lab-cell-win {
+    @apply bg-emerald-100;
+  }
+
+  .lab-stat {
+    @apply min-w-0 rounded-lg border bg-slate-50 p-3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
