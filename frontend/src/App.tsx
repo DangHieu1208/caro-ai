@@ -1,26 +1,26 @@
 import { useEffect, useState } from 'react'
+
 import {
   Activity,
-  Bot,
   BrainCircuit,
-  Circle,
   Grid3X3,
-  Pause,
   Play,
   RotateCcw,
   Settings2,
   UserRound,
-  X,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+
 import {
   Card,
   CardHeader,
   CardTitle,
   CardContent,
 } from '@/components/ui/card'
+
 import { Badge } from '@/components/ui/badge'
+import { GameBoard } from '@/components/game/GameBoard'
 import { cn } from '@/lib/utils'
 
 import {
@@ -37,12 +37,13 @@ import {
   initialGame,
   play,
   symbol,
-  winningLine,
   type Move,
   type Player,
 } from '@/lib/game'
 
 type Mode = 'human' | 'ai'
+
+type Connection = 'loading' | 'online' | 'offline'
 
 type Log = {
   player: Player
@@ -50,8 +51,6 @@ type Log = {
   algorithm: string
   metrics?: Metrics
 }
-
-type Connection = 'loading' | 'online' | 'offline'
 
 const defaults: Config = {
   depth: 2,
@@ -63,7 +62,6 @@ const defaults: Config = {
 }
 
 const players: Player[] = [1, 2]
-
 const inputStyle = 'lab-control'
 
 function formatNumber(value: number | null | undefined) {
@@ -97,6 +95,7 @@ function StatItem({
 function App() {
   // Agent and connection state
   const [agents, setAgents] = useState<AgentStatus[]>([])
+
   const [connection, setConnection] =
       useState<Connection>('loading')
 
@@ -120,7 +119,7 @@ function App() {
   const [started, setStarted] = useState(false)
   const [paused, setPaused] = useState(false)
 
-  // Logging and errors
+  // Logs and errors
   const [logs, setLogs] = useState<Log[]>([])
   const [error, setError] = useState('')
 
@@ -148,6 +147,12 @@ function App() {
 
   function agentFor(player: Player): Algorithm {
     return player === 1 ? xAgent : oAgent
+  }
+
+  function playerName(player: Player) {
+    return isHuman(player)
+        ? 'Người chơi'
+        : names[agentFor(player)]
   }
 
   const pending = players.filter(
@@ -186,14 +191,7 @@ function App() {
   ) / aiLogs.length
       : null
 
-  const line =
-      game.winner !== null &&
-      game.winner !== 0 &&
-      latest
-          ? winningLine(game.board, ...latest.move)
-          : []
-
-  // Request an AI move whenever it becomes the AI's turn.
+  // Request an AI move.
   useEffect(() => {
     if (!aiTurn || paused || error) return
 
@@ -284,7 +282,7 @@ function App() {
         paused ||
         !isHuman(game.to_move) ||
         game.winner !== null ||
-        game.board[row][col] !== 0
+        game.board[row]?.[col] !== 0
     ) {
       return
     }
@@ -355,17 +353,6 @@ function App() {
         </label>
     )
   }
-
-  const matchStatus =
-      game.winner === 0
-          ? 'Hòa'
-          : game.winner !== null
-              ? `${symbol(game.winner)} thắng`
-              : !started
-                  ? 'Chờ bắt đầu'
-                  : paused
-                      ? 'Tạm dừng'
-                      : `Lượt ${symbol(game.to_move)}`
 
   return (
       <div className="min-h-screen bg-background">
@@ -690,238 +677,26 @@ function App() {
               </CardContent>
             </Card>
 
-            {/* Center panel: Game board */}
-            <Card className="lab-panel overflow-hidden">
-              <CardHeader className="flex-row items-center justify-between space-y-0 border-b">
-                <div>
-                  <CardTitle>Ván đấu</CardTitle>
+            {/* Center panel: Extracted GameBoard */}
+            <GameBoard
+                game={game}
+                playerNames={{
+                  1: playerName(1),
+                  2: playerName(2),
+                }}
+                lastMove={latest?.move ?? null}
+                started={started}
+                paused={paused}
+                aiTurn={aiTurn}
+                error={error}
+                onMove={humanMove}
+                onTogglePause={() =>
+                    setPaused((previous) => !previous)
+                }
+                onRetry={() => setError('')}
+            />
 
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    5 quân liên tiếp để chiến thắng
-                  </p>
-                </div>
-
-                <Badge
-                    className={cn(
-                        game.winner !== null
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                            : 'bg-background',
-                    )}
-                >
-                  {matchStatus}
-                </Badge>
-              </CardHeader>
-
-              <CardContent className="pt-5">
-                {/* Player status */}
-                <div className="mb-5 grid grid-cols-2 gap-3">
-                  {players.map((player) => (
-                      <div
-                          key={player}
-                          className={cn(
-                              'flex min-w-0 items-center gap-3 rounded-lg border p-3 transition-colors',
-                              started &&
-                              game.winner === null &&
-                              game.to_move === player &&
-                              'border-slate-400 bg-slate-50',
-                          )}
-                      >
-                        <div
-                            className={cn(
-                                'grid h-10 w-10 shrink-0 place-items-center rounded-lg',
-                                player === 1
-                                    ? 'bg-blue-50 text-blue-700'
-                                    : 'bg-rose-50 text-rose-600',
-                            )}
-                        >
-                          {player === 1 ? (
-                              <X size={24} strokeWidth={2.8} />
-                          ) : (
-                              <Circle
-                                  size={22}
-                                  strokeWidth={2.8}
-                              />
-                          )}
-                        </div>
-
-                        <div className="min-w-0">
-                          <p className="text-xs text-muted-foreground">
-                            Quân {symbol(player)}
-                          </p>
-
-                          <p
-                              className="truncate text-sm font-semibold"
-                              title={
-                                isHuman(player)
-                                    ? 'Người chơi'
-                                    : names[agentFor(player)]
-                              }
-                          >
-                            {isHuman(player)
-                                ? 'Người chơi'
-                                : names[agentFor(player)]}
-                          </p>
-                        </div>
-                      </div>
-                  ))}
-                </div>
-
-                {/* Board */}
-                <div className="mx-auto w-full max-w-[590px]">
-                  <div className="grid grid-cols-[22px_repeat(9,minmax(0,1fr))] items-center text-center text-[11px] text-muted-foreground">
-                    <div />
-
-                    {Array.from(
-                        { length: 9 },
-                        (_, col) => (
-                            <div key={col} className="pb-2">
-                              {col}
-                            </div>
-                        ),
-                    )}
-
-                    {game.board.map((row, rowIndex) => (
-                        <div
-                            className="contents"
-                            key={rowIndex}
-                        >
-                          <div className="pr-1">
-                            {rowIndex}
-                          </div>
-
-                          {row.map((cell, colIndex) => {
-                            const win = line.some(
-                                ([row, col]) =>
-                                    row === rowIndex &&
-                                    col === colIndex,
-                            )
-
-                            const last =
-                                latest?.move[0] === rowIndex &&
-                                latest?.move[1] === colIndex
-
-                            return (
-                                <button
-                                    key={colIndex}
-                                    type="button"
-                                    aria-label={`Hàng ${rowIndex}, cột ${colIndex}: ${
-                                        cell === 0
-                                            ? 'trống'
-                                            : symbol(cell)
-                                    }`}
-                                    disabled={
-                                        !started ||
-                                        paused ||
-                                        aiTurn ||
-                                        game.winner !== null ||
-                                        cell !== 0
-                                    }
-                                    onClick={() =>
-                                        humanMove([
-                                          rowIndex,
-                                          colIndex,
-                                        ])
-                                    }
-                                    className={cn(
-                                        'lab-cell',
-                                        rowIndex === 0 &&
-                                        'border-t',
-                                        colIndex === 0 &&
-                                        'border-l',
-                                        last && 'lab-cell-last',
-                                        win && 'lab-cell-win',
-                                    )}
-                                >
-                                  {cell === 1 ? (
-                                      <X
-                                          className="h-3/5 w-3/5 text-blue-700"
-                                          strokeWidth={2.6}
-                                      />
-                                  ) : cell === 2 ? (
-                                      <Circle
-                                          className="h-[52%] w-[52%] text-rose-600"
-                                          strokeWidth={2.6}
-                                      />
-                                  ) : (
-                                      <span className="h-1 w-1 rounded-full bg-slate-200" />
-                                  )}
-
-                                  {last && (
-                                      <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-slate-500" />
-                                  )}
-                                </button>
-                            )
-                          })}
-                        </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Match controls */}
-                <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-                  <div
-                      aria-live="polite"
-                      className="flex items-center gap-2 text-sm text-muted-foreground"
-                  >
-                    {error ? (
-                        'Không thể hoàn thành lượt máy'
-                    ) : aiTurn && !paused ? (
-                        <>
-                          <Bot
-                              size={18}
-                              className="animate-pulse"
-                          />
-                          AI đang suy luận...
-                        </>
-                    ) : game.winner !== null ? (
-                        'Ván đấu đã kết thúc'
-                    ) : !started ? (
-                        'Cấu hình và bắt đầu trận đấu'
-                    ) : paused ? (
-                        'Trận đấu đang tạm dừng'
-                    ) : (
-                        'Đến lượt người chơi'
-                    )}
-                  </div>
-
-                  {started && game.winner === null && (
-                      <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                              setPaused((previous) => !previous)
-                          }
-                      >
-                        {paused ? (
-                            <Play size={14} />
-                        ) : (
-                            <Pause size={14} />
-                        )}
-
-                        {paused ? 'Tiếp tục' : 'Tạm dừng'}
-                      </Button>
-                  )}
-                </div>
-
-                {error && (
-                    <div
-                        role="alert"
-                        className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
-                    >
-                      {error}
-
-                      <button
-                          className="ml-2 font-medium underline"
-                          onClick={() => setError('')}
-                      >
-                        Thử lại
-                      </button>
-                    </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Right panel: Metrics and move history */}
+            {/* Right panel: Metrics and history */}
             <div className="grid gap-5 lg:col-span-2 lg:grid-cols-2 xl:col-span-1 xl:grid-cols-1">
               <Card className="lab-panel">
                 <CardHeader className="border-b">
