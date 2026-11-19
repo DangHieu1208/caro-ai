@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from random import Random
 from time import perf_counter
@@ -9,6 +10,14 @@ from app.core.game import GameState
 
 
 Side = Literal['A', 'B']
+
+ProgressCallback = Callable[[int, int], None]
+
+CancellationCheck = Callable[[], bool]
+
+
+class ExperimentCancelled(Exception):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +72,15 @@ class ExperimentResult:
     summary_b: SideSummary
 
 
+def _check_cancelled(
+    cancelled: CancellationCheck | None,
+) -> None:
+    if cancelled is not None and cancelled():
+        raise ExperimentCancelled(
+            'Experiment was cancelled'
+        )
+
+
 def _validate_competitor(
     competitor: Competitor,
 ) -> None:
@@ -93,14 +111,13 @@ def _play_game(
     game_number: int,
     pair_seed: int,
     x_side: Side,
+    cancelled: CancellationCheck | None = None,
 ) -> GameRecord:
     competitors = {
         'A': competitor_a,
         'B': competitor_b,
     }
 
-    # Recreate the same random streams
-    # when the competitors swap sides.
     pair_rng = Random(pair_seed)
 
     streams = {
@@ -113,6 +130,8 @@ def _play_game(
     moves: list[MoveRecord] = []
 
     while state.winner is None:
+        _check_cancelled(cancelled)
+
         player = state.to_move
 
         side = (
@@ -123,8 +142,6 @@ def _play_game(
 
         competitor = competitors[side]
 
-        # Generate a reproducible seed
-        # for this decision.
         move_seed = streams[side].getrandbits(53)
 
         config = replace(
@@ -138,7 +155,6 @@ def _play_game(
 
         agent = agent_class()
 
-        # Measure search time only.
         start = perf_counter()
 
         result = agent.choose_move(
@@ -150,15 +166,14 @@ def _play_game(
             perf_counter() - start
         ) * 1000
 
-        # Reject an illegal move.
+        _check_cancelled(cancelled)
+
         if result.move not in state.legal_moves():
             raise ValueError(
                 f'Illegal move from {side}: {result.move}'
             )
 
-        state = state.play(
-            result.move
-        )
+        state = state.play(result.move)
 
         moves.append(
             MoveRecord(
@@ -221,11 +236,8 @@ def summarize(
 
     return SideSummary(
         games=total,
-
         wins=wins,
-
         draws=draws,
-
         losses=losses,
 
         win_rate=(
@@ -263,6 +275,9 @@ def run_experiment(
     competitor_b: Competitor,
     pairs: int = 10,
     seed: int = 42,
+    *,
+    on_progress: ProgressCallback | None = None,
+    cancelled: CancellationCheck | None = None,
 ) -> ExperimentResult:
     if type(pairs) is not int or pairs < 1:
         raise ValueError(
@@ -274,37 +289,50 @@ def run_experiment(
             'seed must be an integer'
         )
 
-    _validate_competitor(
-        competitor_a
-    )
+    _validate_competitor(competitor_a)
+    _validate_competitor(competitor_b)
 
-    _validate_competitor(
-        competitor_b
-    )
+    _check_cancelled(cancelled)
 
     master_rng = Random(seed)
 
+    total_games = pairs * 2
+
     records: list[GameRecord] = []
+
+    if on_progress is not None:
+        on_progress(0, total_games)
 
     for pair_number in range(
         1,
         pairs + 1,
     ):
+        _check_cancelled(cancelled)
+
         pair_seed = master_rng.getrandbits(53)
 
-        # Game 1: A plays X.
-        # Game 2: B plays X.
         for x_side in ('A', 'B'):
-            records.append(
-                _play_game(
-                    competitor_a=competitor_a,
-                    competitor_b=competitor_b,
-                    pair_number=pair_number,
-                    game_number=len(records) + 1,
-                    pair_seed=pair_seed,
-                    x_side=x_side,
-                )
+            _check_cancelled(cancelled)
+
+            record = _play_game(
+                competitor_a=competitor_a,
+                competitor_b=competitor_b,
+                pair_number=pair_number,
+                game_number=len(records) + 1,
+                pair_seed=pair_seed,
+                x_side=x_side,
+                cancelled=cancelled,
             )
+
+            records.append(record)
+
+            if on_progress is not None:
+                on_progress(
+                    len(records),
+                    total_games,
+                )
+
+    _check_cancelled(cancelled)
 
     games = tuple(records)
 
@@ -315,13 +343,7 @@ def run_experiment(
         seed=seed,
         games=games,
 
-        summary_a=summarize(
-            games,
-            'A',
-        ),
+        summary_a=summarize(games, 'A'),
 
-        summary_b=summarize(
-            games,
-            'B',
-        ),
+        summary_b=summarize(games, 'B'),
     )
