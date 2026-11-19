@@ -4,13 +4,7 @@ import {
   Activity,
   BrainCircuit,
   Grid3X3,
-  Play,
-  RotateCcw,
-  Settings2,
-  UserRound,
 } from 'lucide-react'
-
-import { Button } from '@/components/ui/button'
 
 import {
   Card,
@@ -20,14 +14,23 @@ import {
 } from '@/components/ui/card'
 
 import { Badge } from '@/components/ui/badge'
-import { GameBoard } from '@/components/game/GameBoard'
+
+import {
+  GameBoard,
+} from '@/components/game/GameBoard'
+
+import {
+  MatchSettings,
+  type MatchSettingsValue,
+  type Connection,
+} from '@/components/game/MatchSettings'
+
 import { cn } from '@/lib/utils'
 
 import {
   getAgents,
   getMove,
   names,
-  type Algorithm,
   type AgentStatus,
   type Config,
   type Metrics,
@@ -41,10 +44,6 @@ import {
   type Player,
 } from '@/lib/game'
 
-type Mode = 'human' | 'ai'
-
-type Connection = 'loading' | 'online' | 'offline'
-
 type Log = {
   player: Player
   move: Move
@@ -52,19 +51,53 @@ type Log = {
   metrics?: Metrics
 }
 
-const defaults: Config = {
-  depth: 2,
-  candidate_limit: 10,
-  pruning: true,
-  iterations: 300,
-  c: 1.4,
-  rollout: 'random',
+const players: Player[] = [1, 2]
+
+function createDefaultConfig(): Config {
+  return {
+    depth: 2,
+    candidate_limit: 10,
+    pruning: true,
+    iterations: 300,
+    c: 1.4,
+    rollout: 'random',
+  }
 }
 
-const players: Player[] = [1, 2]
-const inputStyle = 'lab-control'
+function createDefaultSettings(): MatchSettingsValue {
+  return {
+    mode: 'human',
+    human: 1,
+    delay: 350,
+    sides: {
+      1: {
+        algorithm: 'random',
+        config: createDefaultConfig(),
+      },
+      2: {
+        algorithm: 'random',
+        config: createDefaultConfig(),
+      },
+    },
+  }
+}
 
-function formatNumber(value: number | null | undefined) {
+function algorithmName(
+    settings: MatchSettingsValue['sides'][Player],
+) {
+  if (
+      settings.algorithm === 'minimax' &&
+      !settings.config.pruning
+  ) {
+    return 'MiniMax thuần'
+  }
+
+  return names[settings.algorithm]
+}
+
+function formatNumber(
+    value: number | null | undefined,
+) {
   if (value == null) return '—'
 
   return value.toLocaleString('vi-VN', {
@@ -93,35 +126,35 @@ function StatItem({
 }
 
 function App() {
-  // Agent and connection state
-  const [agents, setAgents] = useState<AgentStatus[]>([])
+  // Backend connection
+  const [agents, setAgents] =
+      useState<AgentStatus[]>([])
 
   const [connection, setConnection] =
       useState<Connection>('loading')
 
-  // Match configuration
-  const [mode, setMode] = useState<Mode>('human')
-  const [human, setHuman] = useState<Player>(1)
-
-  const [xAgent, setXAgent] =
-      useState<Algorithm>('random')
-
-  const [oAgent, setOAgent] =
-      useState<Algorithm>('random')
-
-  const [config, setConfig] =
-      useState<Config>(defaults)
-
-  const [delay, setDelay] = useState(350)
+  // Independent player configurations
+  const [settings, setSettings] =
+      useState<MatchSettingsValue>(
+          createDefaultSettings,
+      )
 
   // Match state
-  const [game, setGame] = useState(initialGame)
-  const [started, setStarted] = useState(false)
-  const [paused, setPaused] = useState(false)
+  const [game, setGame] =
+      useState(initialGame)
+
+  const [started, setStarted] =
+      useState(false)
+
+  const [paused, setPaused] =
+      useState(false)
 
   // Logs and errors
-  const [logs, setLogs] = useState<Log[]>([])
-  const [error, setError] = useState('')
+  const [logs, setLogs] =
+      useState<Log[]>([])
+
+  const [error, setError] =
+      useState('')
 
   function refresh() {
     setConnection('loading')
@@ -142,39 +175,41 @@ function App() {
   }, [])
 
   function isHuman(player: Player) {
-    return mode === 'human' && player === human
-  }
-
-  function agentFor(player: Player): Algorithm {
-    return player === 1 ? xAgent : oAgent
+    return (
+        settings.mode === 'human' &&
+        settings.human === player
+    )
   }
 
   function playerName(player: Player) {
     return isHuman(player)
         ? 'Người chơi'
-        : names[agentFor(player)]
+        : algorithmName(
+            settings.sides[player],
+        )
   }
 
-  const pending = players.filter(
+  const pending = players.some(
       (player) =>
           !isHuman(player) &&
           !agents.some(
               (agent) =>
-                  agent.id === agentFor(player) &&
+                  agent.id ===
+                  settings.sides[player].algorithm &&
                   agent.ready,
           ),
   )
-
-  const activeAlgorithms = players
-      .filter((player) => !isHuman(player))
-      .map(agentFor)
 
   const aiTurn =
       started &&
       game.winner === null &&
       !isHuman(game.to_move)
 
-  const locked = started
+  // Select the configuration of the current side.
+  const turnSettings =
+      settings.sides[game.to_move]
+
+  const delay = settings.delay
 
   const latest = logs.at(-1)
 
@@ -186,56 +221,64 @@ function App() {
 
   const averageTime = aiLogs.length
       ? aiLogs.reduce(
-      (sum, log) => sum + log.metrics!.elapsed_ms,
+      (sum, log) =>
+          sum + log.metrics!.elapsed_ms,
       0,
   ) / aiLogs.length
       : null
 
-  // Request an AI move.
+  // AI move lifecycle
   useEffect(() => {
-    if (!aiTurn || paused || error) return
+    if (!aiTurn || paused || error) {
+      return
+    }
 
-    const controller = new AbortController()
+    const controller =
+        new AbortController()
 
-    const timer = window.setTimeout(async () => {
-      try {
-        const algorithm =
-            game.to_move === 1 ? xAgent : oAgent
+    const timer = window.setTimeout(
+        async () => {
+          try {
+            const next = await getMove(
+                game,
+                turnSettings.algorithm,
+                turnSettings.config,
+                controller.signal,
+            )
 
-        const next = await getMove(
-            game,
-            algorithm,
-            config,
-            controller.signal,
-        )
+            if (controller.signal.aborted) {
+              return
+            }
 
-        if (controller.signal.aborted) return
+            setLogs((previous) => [
+              ...previous,
+              {
+                player: game.to_move,
+                move: next.move,
+                algorithm: algorithmName(
+                    turnSettings,
+                ),
+                metrics: next.metrics,
+              },
+            ])
 
-        setLogs((previous) => [
-          ...previous,
-          {
-            player: game.to_move,
-            move: next.move,
-            algorithm: names[algorithm],
-            metrics: next.metrics,
-          },
-        ])
-
-        setGame({
-          board: next.board,
-          to_move: next.to_move,
-          winner: next.winner,
-        })
-      } catch (requestError) {
-        if (!controller.signal.aborted) {
-          setError(
-              requestError instanceof Error
-                  ? requestError.message
-                  : 'Không thể lấy nước đi từ backend.',
-          )
-        }
-      }
-    }, delay)
+            setGame({
+              board: next.board,
+              to_move: next.to_move,
+              winner: next.winner,
+            })
+          } catch (requestError) {
+            if (!controller.signal.aborted) {
+              setError(
+                  requestError instanceof Error
+                      ? requestError.message
+                      : 'Không thể lấy nước đi từ backend.',
+              )
+            }
+          }
+        },
+        delay,
+    )
 
     return () => {
       window.clearTimeout(timer)
@@ -246,9 +289,7 @@ function App() {
     paused,
     error,
     game,
-    xAgent,
-    oAgent,
-    config,
+    turnSettings,
     delay,
   ])
 
@@ -264,7 +305,7 @@ function App() {
     if (
         started ||
         connection !== 'online' ||
-        pending.length > 0
+        pending
     ) {
       return
     }
@@ -272,6 +313,23 @@ function App() {
     setError('')
     setPaused(false)
     setStarted(true)
+  }
+
+  function updateSettings(
+      next: MatchSettingsValue,
+  ) {
+    if (started) {
+      // Only the animation delay may change
+      // during an ongoing match.
+      setSettings((previous) => ({
+        ...previous,
+        delay: next.delay,
+      }))
+
+      return
+    }
+
+    setSettings(next)
   }
 
   function humanMove(move: Move) {
@@ -299,59 +357,6 @@ function App() {
     ])
 
     setGame(next)
-  }
-
-  function setNum(
-      key: 'depth' | 'candidate_limit' | 'iterations' | 'c',
-      value: number,
-  ) {
-    setConfig((previous) => ({
-      ...previous,
-      [key]: value,
-    }))
-  }
-
-  function renderAlgorithmSelect(player: Player) {
-    return (
-        <label className="block space-y-2 text-sm font-medium">
-          <span>Quân {symbol(player)}</span>
-
-          {isHuman(player) ? (
-              <div className="flex h-10 items-center gap-2 rounded-md border bg-muted px-3 text-sm text-muted-foreground">
-                <UserRound size={15} />
-                Người chơi
-              </div>
-          ) : (
-              <select
-                  className={inputStyle}
-                  disabled={locked}
-                  value={agentFor(player)}
-                  onChange={(event) => {
-                    const algorithm =
-                        event.target.value as Algorithm
-
-                    if (player === 1) {
-                      setXAgent(algorithm)
-                    } else {
-                      setOAgent(algorithm)
-                    }
-                  }}
-              >
-                {Object.entries(names).map(([id, name]) => (
-                    <option key={id} value={id}>
-                      {name}
-                      {agents.some(
-                          (agent) =>
-                              agent.id === id && agent.ready,
-                      )
-                          ? ''
-                          : ' (chưa tích hợp)'}
-                    </option>
-                ))}
-              </select>
-          )}
-        </label>
-    )
   }
 
   return (
@@ -419,265 +424,24 @@ function App() {
             </h2>
 
             <p className="mt-2 text-sm text-muted-foreground">
-              Thi đấu và khám phá các thuật toán tìm kiếm
-              đối kháng.
+              Thi đấu và khám phá các thuật toán
+              tìm kiếm đối kháng.
             </p>
           </div>
 
-          <div className="grid items-start gap-5 lg:grid-cols-[270px_minmax(0,1fr)] xl:grid-cols-[270px_minmax(0,1fr)_285px]">
-            {/* Left panel: Match configuration */}
-            <Card className="lab-panel">
-              <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2">
-                  <Settings2 size={18} />
-                  Cấu hình trận đấu
-                </CardTitle>
+          <div className="grid items-start gap-5 lg:grid-cols-[290px_minmax(0,1fr)] xl:grid-cols-[290px_minmax(0,1fr)_285px]">
+            {/* Left panel */}
+            <MatchSettings
+                value={settings}
+                agents={agents}
+                connection={connection}
+                locked={started}
+                onChange={updateSettings}
+                onStart={startMatch}
+                onReset={reset}
+            />
 
-                <p className="text-xs text-muted-foreground">
-                  Thiết lập người chơi và thuật toán.
-                </p>
-              </CardHeader>
-
-              <CardContent className="space-y-5 pt-5">
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">
-                    Chế độ chơi
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
-                    {(['human', 'ai'] as Mode[]).map(
-                        (item) => (
-                            <button
-                                key={item}
-                                disabled={locked}
-                                aria-pressed={mode === item}
-                                onClick={() => setMode(item)}
-                                className={cn(
-                                    'rounded-md px-2 py-2 text-xs font-medium transition-colors disabled:opacity-60',
-                                    mode === item
-                                        ? 'bg-card text-foreground shadow-sm'
-                                        : 'text-muted-foreground hover:text-foreground',
-                                )}
-                            >
-                              {item === 'human'
-                                  ? 'Người vs Máy'
-                                  : 'Máy vs Máy'}
-                            </button>
-                        ),
-                    )}
-                  </div>
-                </div>
-
-                {mode === 'human' && (
-                    <label className="block space-y-2 text-sm font-medium">
-                      <span>Bạn chơi quân</span>
-
-                      <select
-                          className={inputStyle}
-                          disabled={locked}
-                          value={human}
-                          onChange={(event) =>
-                              setHuman(
-                                  Number(event.target.value) as Player,
-                              )
-                          }
-                      >
-                        <option value={1}>X — đi trước</option>
-                        <option value={2}>O — đi sau</option>
-                      </select>
-                    </label>
-                )}
-
-                {renderAlgorithmSelect(1)}
-                {renderAlgorithmSelect(2)}
-
-                {/* MiniMax parameters */}
-                {activeAlgorithms.includes('minimax') && (
-                    <div className="space-y-4 border-t pt-4">
-                      <p className="text-sm font-semibold">
-                        Tham số MiniMax
-                      </p>
-
-                      <label className="block space-y-2 text-xs font-medium">
-                        <span>Độ sâu tìm kiếm</span>
-
-                        <select
-                            className={inputStyle}
-                            disabled={locked}
-                            value={config.depth}
-                            onChange={(event) =>
-                                setNum(
-                                    'depth',
-                                    Number(event.target.value),
-                                )
-                            }
-                        >
-                          {[2, 3, 4, 5].map((depth) => (
-                              <option key={depth} value={depth}>
-                                {depth}
-                              </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <label className="block space-y-2 text-xs font-medium">
-                        <span>Giới hạn ứng viên</span>
-
-                        <select
-                            className={inputStyle}
-                            disabled={locked}
-                            value={config.candidate_limit}
-                            onChange={(event) =>
-                                setNum(
-                                    'candidate_limit',
-                                    Number(event.target.value),
-                                )
-                            }
-                        >
-                          {[5, 10, 15, 20, 0].map((limit) => (
-                              <option key={limit} value={limit}>
-                                {limit || 'Không giới hạn'}
-                              </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <label className="flex items-center gap-2 text-xs font-medium">
-                        <input
-                            type="checkbox"
-                            className="h-4 w-4 accent-slate-900"
-                            disabled={locked}
-                            checked={config.pruning}
-                            onChange={(event) =>
-                                setConfig((previous) => ({
-                                  ...previous,
-                                  pruning: event.target.checked,
-                                }))
-                            }
-                        />
-
-                        Alpha-Beta Pruning
-                      </label>
-                    </div>
-                )}
-
-                {/* MCTS parameters */}
-                {activeAlgorithms.includes('mcts') && (
-                    <div className="space-y-4 border-t pt-4">
-                      <p className="text-sm font-semibold">
-                        Tham số MCTS
-                      </p>
-
-                      <label className="block space-y-2 text-xs font-medium">
-                        <span>Số iterations</span>
-
-                        <select
-                            className={inputStyle}
-                            disabled={locked}
-                            value={config.iterations}
-                            onChange={(event) =>
-                                setNum(
-                                    'iterations',
-                                    Number(event.target.value),
-                                )
-                            }
-                        >
-                          {[100, 300, 500, 1000, 3000].map(
-                              (iterations) => (
-                                  <option
-                                      key={iterations}
-                                      value={iterations}
-                                  >
-                                    {iterations}
-                                  </option>
-                              ),
-                          )}
-                        </select>
-                      </label>
-
-                      <label className="block space-y-2 text-xs font-medium">
-                        <span>Hệ số khám phá UCT (c)</span>
-
-                        <select
-                            className={inputStyle}
-                            disabled={locked}
-                            value={config.c}
-                            onChange={(event) =>
-                                setNum(
-                                    'c',
-                                    Number(event.target.value),
-                                )
-                            }
-                        >
-                          {[0.5, 1, 1.4, 2].map((value) => (
-                              <option key={value} value={value}>
-                                {value.toFixed(1)}
-                              </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                )}
-
-                <label className="block space-y-2 border-t pt-4 text-xs font-medium">
-                  <span>Khoảng nghỉ trước lượt máy</span>
-
-                  <select
-                      className={inputStyle}
-                      value={delay}
-                      onChange={(event) =>
-                          setDelay(Number(event.target.value))
-                      }
-                  >
-                    <option value={0}>Không nghỉ</option>
-                    <option value={350}>350 ms</option>
-                    <option value={800}>800 ms</option>
-                  </select>
-                </label>
-
-                {!locked &&
-                    connection === 'online' &&
-                    pending.length > 0 && (
-                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
-                          Thuật toán đã chọn chưa được tích hợp.
-                          Hãy chọn Random để thử nghiệm.
-                        </div>
-                    )}
-
-                {connection === 'offline' && (
-                    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs leading-relaxed text-red-800">
-                      Không thể kết nối backend. Hãy kiểm tra
-                      server FastAPI.
-                    </div>
-                )}
-
-                <div className="space-y-2">
-                  <Button
-                      className="w-full"
-                      disabled={
-                          locked ||
-                          connection !== 'online' ||
-                          pending.length > 0
-                      }
-                      onClick={startMatch}
-                  >
-                    <Play size={15} />
-                    Bắt đầu trận
-                  </Button>
-
-                  <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={reset}
-                  >
-                    <RotateCcw size={15} />
-                    Trận mới
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Center panel: Extracted GameBoard */}
+            {/* Center panel */}
             <GameBoard
                 game={game}
                 playerNames={{
@@ -691,13 +455,16 @@ function App() {
                 error={error}
                 onMove={humanMove}
                 onTogglePause={() =>
-                    setPaused((previous) => !previous)
+                    setPaused(
+                        (previous) => !previous,
+                    )
                 }
                 onRetry={() => setError('')}
             />
 
-            {/* Right panel: Metrics and history */}
+            {/* Right panel */}
             <div className="grid gap-5 lg:col-span-2 lg:grid-cols-2 xl:col-span-1 xl:grid-cols-1">
+              {/* Live statistics */}
               <Card className="lab-panel">
                 <CardHeader className="border-b">
                   <CardTitle className="flex items-center gap-2">
@@ -722,7 +489,9 @@ function App() {
                         value={
                           averageTime === null
                               ? '—'
-                              : `${formatNumber(averageTime)} ms`
+                              : `${formatNumber(
+                                  averageTime,
+                              )} ms`
                         }
                     />
 
@@ -760,12 +529,13 @@ function App() {
                   </div>
 
                   <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                    Các chỉ số không được thuật toán cung cấp
-                    sẽ hiển thị dấu —.
+                    Các chỉ số không được thuật toán
+                    cung cấp sẽ hiển thị dấu —.
                   </p>
                 </CardContent>
               </Card>
 
+              {/* Move history */}
               <Card className="lab-panel">
                 <CardHeader className="border-b">
                   <CardTitle className="flex items-center gap-2">
@@ -791,8 +561,8 @@ function App() {
                         </p>
 
                         <p className="text-xs text-muted-foreground">
-                          Nhật ký sẽ xuất hiện khi trận đấu
-                          bắt đầu.
+                          Nhật ký sẽ xuất hiện khi
+                          trận đấu bắt đầu.
                         </p>
                       </div>
                   ) : (
