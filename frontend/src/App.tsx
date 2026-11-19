@@ -1,29 +1,23 @@
 import { useEffect, useState } from 'react'
-
-import {
-  Activity,
-  BrainCircuit,
-  Grid3X3,
-} from 'lucide-react'
-
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-} from '@/components/ui/card'
+import { Grid3X3 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 
-import {
-  GameBoard,
-} from '@/components/game/GameBoard'
+import { GameBoard } from '@/components/game/GameBoard'
 
 import {
   MatchSettings,
   type MatchSettingsValue,
   type Connection,
 } from '@/components/game/MatchSettings'
+
+import {
+  GameStatistics,
+} from '@/components/game/GameStatistics'
+
+import {
+  MoveHistory,
+} from '@/components/game/MoveHistory'
 
 import { cn } from '@/lib/utils'
 
@@ -33,23 +27,18 @@ import {
   names,
   type AgentStatus,
   type Config,
-  type Metrics,
 } from '@/lib/api'
 
 import {
   initialGame,
   play,
-  symbol,
   type Move,
   type Player,
 } from '@/lib/game'
 
-type Log = {
-  player: Player
-  move: Move
-  algorithm: string
-  metrics?: Metrics
-}
+import type {
+  MoveLog,
+} from '@/lib/statistics'
 
 const players: Player[] = [1, 2]
 
@@ -69,11 +58,13 @@ function createDefaultSettings(): MatchSettingsValue {
     mode: 'human',
     human: 1,
     delay: 350,
+
     sides: {
       1: {
         algorithm: 'random',
         config: createDefaultConfig(),
       },
+
       2: {
         algorithm: 'random',
         config: createDefaultConfig(),
@@ -84,7 +75,7 @@ function createDefaultSettings(): MatchSettingsValue {
 
 function algorithmName(
     settings: MatchSettingsValue['sides'][Player],
-) {
+): string {
   if (
       settings.algorithm === 'minimax' &&
       !settings.config.pruning
@@ -95,36 +86,6 @@ function algorithmName(
   return names[settings.algorithm]
 }
 
-function formatNumber(
-    value: number | null | undefined,
-) {
-  if (value == null) return '—'
-
-  return value.toLocaleString('vi-VN', {
-    maximumFractionDigits: 2,
-  })
-}
-
-function StatItem({
-                    label,
-                    value,
-                  }: {
-  label: string
-  value: string | number
-}) {
-  return (
-      <div className="lab-stat">
-        <p className="text-xs text-muted-foreground">
-          {label}
-        </p>
-
-        <p className="mt-2 break-words text-xl font-semibold tabular-nums">
-          {value}
-        </p>
-      </div>
-  )
-}
-
 function App() {
   // Backend connection
   const [agents, setAgents] =
@@ -133,7 +94,7 @@ function App() {
   const [connection, setConnection] =
       useState<Connection>('loading')
 
-  // Independent player configurations
+  // Match configuration
   const [settings, setSettings] =
       useState<MatchSettingsValue>(
           createDefaultSettings,
@@ -149,9 +110,9 @@ function App() {
   const [paused, setPaused] =
       useState(false)
 
-  // Logs and errors
+  // Match logs and errors
   const [logs, setLogs] =
-      useState<Log[]>([])
+      useState<MoveLog[]>([])
 
   const [error, setError] =
       useState('')
@@ -174,19 +135,31 @@ function App() {
     refresh()
   }, [])
 
-  function isHuman(player: Player) {
+  function isHuman(
+      player: Player,
+  ): boolean {
     return (
         settings.mode === 'human' &&
         settings.human === player
     )
   }
 
-  function playerName(player: Player) {
+  function playerName(
+      player: Player,
+  ): string {
     return isHuman(player)
         ? 'Người chơi'
         : algorithmName(
             settings.sides[player],
         )
+  }
+
+  const playerNames: Record<
+      Player,
+      string
+  > = {
+    1: playerName(1),
+    2: playerName(2),
   }
 
   const pending = players.some(
@@ -205,31 +178,22 @@ function App() {
       game.winner === null &&
       !isHuman(game.to_move)
 
-  // Select the configuration of the current side.
   const turnSettings =
       settings.sides[game.to_move]
 
-  const delay = settings.delay
+  const delay =
+      settings.delay
 
-  const latest = logs.at(-1)
-
-  const aiLogs = logs.filter(
-      (log) => log.metrics !== undefined,
-  )
-
-  const lastAI = aiLogs.at(-1)
-
-  const averageTime = aiLogs.length
-      ? aiLogs.reduce(
-      (sum, log) =>
-          sum + log.metrics!.elapsed_ms,
-      0,
-  ) / aiLogs.length
-      : null
+  const latest =
+      logs.at(-1)
 
   // AI move lifecycle
   useEffect(() => {
-    if (!aiTurn || paused || error) {
+    if (
+        !aiTurn ||
+        paused ||
+        error
+    ) {
       return
     }
 
@@ -246,20 +210,34 @@ function App() {
                 controller.signal,
             )
 
-            if (controller.signal.aborted) {
+            if (
+                controller.signal.aborted
+            ) {
               return
+            }
+
+            const log: MoveLog = {
+              player: game.to_move,
+
+              move: next.move,
+
+              algorithm: algorithmName(
+                  turnSettings,
+              ),
+
+              algorithmId:
+              turnSettings.algorithm,
+
+              config: {
+                ...turnSettings.config,
+              },
+
+              metrics: next.metrics,
             }
 
             setLogs((previous) => [
               ...previous,
-              {
-                player: game.to_move,
-                move: next.move,
-                algorithm: algorithmName(
-                    turnSettings,
-                ),
-                metrics: next.metrics,
-              },
+              log,
             ])
 
             setGame({
@@ -268,7 +246,9 @@ function App() {
               winner: next.winner,
             })
           } catch (requestError) {
-            if (!controller.signal.aborted) {
+            if (
+                !controller.signal.aborted
+            ) {
               setError(
                   requestError instanceof Error
                       ? requestError.message
@@ -296,7 +276,11 @@ function App() {
   function reset() {
     setStarted(false)
     setPaused(false)
-    setGame(initialGame())
+
+    setGame(
+        initialGame(),
+    )
+
     setLogs([])
     setError('')
   }
@@ -319,8 +303,6 @@ function App() {
       next: MatchSettingsValue,
   ) {
     if (started) {
-      // Only the animation delay may change
-      // during an ongoing match.
       setSettings((previous) => ({
         ...previous,
         delay: next.delay,
@@ -332,7 +314,9 @@ function App() {
     setSettings(next)
   }
 
-  function humanMove(move: Move) {
+  function humanMove(
+      move: Move,
+  ) {
     const [row, col] = move
 
     if (
@@ -345,15 +329,22 @@ function App() {
       return
     }
 
-    const next = play(game, move)
+    const next =
+        play(game, move)
+
+    const log: MoveLog = {
+      player: game.to_move,
+
+      move,
+
+      algorithm: 'Người chơi',
+
+      algorithmId: 'human',
+    }
 
     setLogs((previous) => [
       ...previous,
-      {
-        player: game.to_move,
-        move,
-        algorithm: 'Người chơi',
-      },
+      log,
     ])
 
     setGame(next)
@@ -394,6 +385,7 @@ function App() {
               <span
                   className={cn(
                       'h-2 w-2 shrink-0 rounded-full',
+
                       connection === 'online'
                           ? 'bg-emerald-500'
                           : connection === 'offline'
@@ -429,7 +421,8 @@ function App() {
             </p>
           </div>
 
-          <div className="grid items-start gap-5 lg:grid-cols-[290px_minmax(0,1fr)] xl:grid-cols-[290px_minmax(0,1fr)_285px]">
+          {/* Match workspace */}
+          <div className="grid items-start gap-5 lg:grid-cols-[290px_minmax(0,1fr)] xl:grid-cols-[290px_minmax(0,1fr)_310px]">
             {/* Left panel */}
             <MatchSettings
                 value={settings}
@@ -444,11 +437,10 @@ function App() {
             {/* Center panel */}
             <GameBoard
                 game={game}
-                playerNames={{
-                  1: playerName(1),
-                  2: playerName(2),
-                }}
-                lastMove={latest?.move ?? null}
+                playerNames={playerNames}
+                lastMove={
+                    latest?.move ?? null
+                }
                 started={started}
                 paused={paused}
                 aiTurn={aiTurn}
@@ -459,174 +451,22 @@ function App() {
                         (previous) => !previous,
                     )
                 }
-                onRetry={() => setError('')}
+                onRetry={() =>
+                    setError('')
+                }
             />
 
             {/* Right panel */}
-            <div className="grid gap-5 lg:col-span-2 lg:grid-cols-2 xl:col-span-1 xl:grid-cols-1">
-              {/* Live statistics */}
-              <Card className="lab-panel">
-                <CardHeader className="border-b">
-                  <CardTitle className="flex items-center gap-2">
-                    <Activity size={18} />
-                    Thống kê trực tiếp
-                  </CardTitle>
+            <div className="grid min-w-0 gap-5 lg:col-span-2 lg:grid-cols-2 xl:col-span-1 xl:grid-cols-1">
+              <GameStatistics
+                  logs={logs}
+                  playerNames={playerNames}
+              />
 
-                  <p className="text-xs text-muted-foreground">
-                    Số liệu từ quá trình suy luận.
-                  </p>
-                </CardHeader>
-
-                <CardContent className="pt-5">
-                  <div className="grid grid-cols-2 gap-2">
-                    <StatItem
-                        label="Số nước đi"
-                        value={logs.length}
-                    />
-
-                    <StatItem
-                        label="Thời gian TB"
-                        value={
-                          averageTime === null
-                              ? '—'
-                              : `${formatNumber(
-                                  averageTime,
-                              )} ms`
-                        }
-                    />
-
-                    <StatItem
-                        label="Thời gian gần nhất"
-                        value={
-                          lastAI?.metrics
-                              ? `${formatNumber(
-                                  lastAI.metrics.elapsed_ms,
-                              )} ms`
-                              : '—'
-                        }
-                    />
-
-                    <StatItem
-                        label="Số nút duyệt"
-                        value={formatNumber(
-                            lastAI?.metrics?.nodes,
-                        )}
-                    />
-
-                    <StatItem
-                        label="Số lần cắt"
-                        value={formatNumber(
-                            lastAI?.metrics?.cutoffs,
-                        )}
-                    />
-
-                    <StatItem
-                        label="Iterations"
-                        value={formatNumber(
-                            lastAI?.metrics?.iterations,
-                        )}
-                    />
-                  </div>
-
-                  <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                    Các chỉ số không được thuật toán
-                    cung cấp sẽ hiển thị dấu —.
-                  </p>
-                </CardContent>
-              </Card>
-
-              {/* Move history */}
-              <Card className="lab-panel">
-                <CardHeader className="border-b">
-                  <CardTitle className="flex items-center gap-2">
-                    <BrainCircuit size={18} />
-                    Nhật ký nước đi
-                  </CardTitle>
-
-                  <p className="text-xs text-muted-foreground">
-                    Lịch sử các quyết định trong ván.
-                  </p>
-                </CardHeader>
-
-                <CardContent className="pt-5">
-                  {logs.length === 0 ? (
-                      <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed px-3 py-10 text-center">
-                        <BrainCircuit
-                            size={25}
-                            className="text-slate-400"
-                        />
-
-                        <p className="text-xs font-medium">
-                          Chưa có nước đi
-                        </p>
-
-                        <p className="text-xs text-muted-foreground">
-                          Nhật ký sẽ xuất hiện khi
-                          trận đấu bắt đầu.
-                        </p>
-                      </div>
-                  ) : (
-                      <div className="max-h-[420px] overflow-auto">
-                        <table className="w-full text-left text-xs">
-                          <thead className="sticky top-0 bg-card text-muted-foreground">
-                          <tr>
-                            <th className="pb-3 font-medium">
-                              #
-                            </th>
-
-                            <th className="pb-3 font-medium">
-                              Quân
-                            </th>
-
-                            <th className="pb-3 font-medium">
-                              Ô (r, c)
-                            </th>
-
-                            <th className="pb-3 text-right font-medium">
-                              ms
-                            </th>
-                          </tr>
-                          </thead>
-
-                          <tbody>
-                          {logs.map((log, index) => (
-                              <tr
-                                  key={index}
-                                  className="border-t hover:bg-muted"
-                              >
-                                <td className="py-2.5 text-muted-foreground">
-                                  {index + 1}
-                                </td>
-
-                                <td
-                                    title={log.algorithm}
-                                    className={cn(
-                                        'font-bold',
-                                        log.player === 1
-                                            ? 'text-blue-700'
-                                            : 'text-rose-600',
-                                    )}
-                                >
-                                  {symbol(log.player)}
-                                </td>
-
-                                <td>
-                                  ({log.move.join(', ')})
-                                </td>
-
-                                <td className="text-right tabular-nums">
-                                  {formatNumber(
-                                      log.metrics?.elapsed_ms,
-                                  )}
-                                </td>
-                              </tr>
-                          ))}
-                          </tbody>
-                        </table>
-                      </div>
-                  )}
-                </CardContent>
-              </Card>
+              <MoveHistory
+                  logs={logs}
+                  winner={game.winner}
+              />
             </div>
           </div>
 
