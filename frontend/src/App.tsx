@@ -1,14 +1,13 @@
-import { useEffect, useState } from 'react'
 import { Grid3X3 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 
-import { GameBoard } from '@/components/game/GameBoard'
+import {
+  GameBoard,
+} from '@/components/game/GameBoard'
 
 import {
   MatchSettings,
-  type MatchSettingsValue,
-  type Connection,
 } from '@/components/game/MatchSettings'
 
 import {
@@ -19,336 +18,22 @@ import {
   MoveHistory,
 } from '@/components/game/MoveHistory'
 
+import { useAgents } from '@/hooks/useAgents'
+import { useGame } from '@/hooks/useGame'
+
 import { cn } from '@/lib/utils'
 
-import {
-  getAgents,
-  getMove,
-  names,
-  type AgentStatus,
-  type Config,
-} from '@/lib/api'
-
-import {
-  initialGame,
-  play,
-  type Move,
-  type Player,
-} from '@/lib/game'
-
-import type {
-  MoveLog,
-} from '@/lib/statistics'
-
-const players: Player[] = [1, 2]
-
-function createDefaultConfig(): Config {
-  return {
-    depth: 2,
-    candidate_limit: 10,
-    pruning: true,
-    iterations: 300,
-    c: 1.4,
-    rollout: 'random',
-  }
-}
-
-function createDefaultSettings(): MatchSettingsValue {
-  return {
-    mode: 'human',
-    human: 1,
-    delay: 350,
-
-    sides: {
-      1: {
-        algorithm: 'random',
-        config: createDefaultConfig(),
-      },
-
-      2: {
-        algorithm: 'random',
-        config: createDefaultConfig(),
-      },
-    },
-  }
-}
-
-function algorithmName(
-    settings: MatchSettingsValue['sides'][Player],
-): string {
-  if (
-      settings.algorithm === 'minimax' &&
-      !settings.config.pruning
-  ) {
-    return 'MiniMax thuần'
-  }
-
-  return names[settings.algorithm]
-}
-
 function App() {
-  // Backend connection
-  const [agents, setAgents] =
-      useState<AgentStatus[]>([])
+  const {
+    agents,
+    connection,
+    refresh,
+  } = useAgents()
 
-  const [connection, setConnection] =
-      useState<Connection>('loading')
-
-  // Match configuration
-  const [settings, setSettings] =
-      useState<MatchSettingsValue>(
-          createDefaultSettings,
-      )
-
-  // Match state
-  const [game, setGame] =
-      useState(initialGame)
-
-  const [started, setStarted] =
-      useState(false)
-
-  const [paused, setPaused] =
-      useState(false)
-
-  // Match logs and errors
-  const [logs, setLogs] =
-      useState<MoveLog[]>([])
-
-  const [error, setError] =
-      useState('')
-
-  function refresh() {
-    setConnection('loading')
-
-    getAgents()
-        .then((result) => {
-          setAgents(result)
-          setConnection('online')
-        })
-        .catch(() => {
-          setAgents([])
-          setConnection('offline')
-        })
-  }
-
-  useEffect(() => {
-    refresh()
-  }, [])
-
-  function isHuman(
-      player: Player,
-  ): boolean {
-    return (
-        settings.mode === 'human' &&
-        settings.human === player
-    )
-  }
-
-  function playerName(
-      player: Player,
-  ): string {
-    return isHuman(player)
-        ? 'Người chơi'
-        : algorithmName(
-            settings.sides[player],
-        )
-  }
-
-  const playerNames: Record<
-      Player,
-      string
-  > = {
-    1: playerName(1),
-    2: playerName(2),
-  }
-
-  const pending = players.some(
-      (player) =>
-          !isHuman(player) &&
-          !agents.some(
-              (agent) =>
-                  agent.id ===
-                  settings.sides[player].algorithm &&
-                  agent.ready,
-          ),
-  )
-
-  const aiTurn =
-      started &&
-      game.winner === null &&
-      !isHuman(game.to_move)
-
-  const turnSettings =
-      settings.sides[game.to_move]
-
-  const delay =
-      settings.delay
-
-  const latest =
-      logs.at(-1)
-
-  // AI move lifecycle
-  useEffect(() => {
-    if (
-        !aiTurn ||
-        paused ||
-        error
-    ) {
-      return
-    }
-
-    const controller =
-        new AbortController()
-
-    const timer = window.setTimeout(
-        async () => {
-          try {
-            const next = await getMove(
-                game,
-                turnSettings.algorithm,
-                turnSettings.config,
-                controller.signal,
-            )
-
-            if (
-                controller.signal.aborted
-            ) {
-              return
-            }
-
-            const log: MoveLog = {
-              player: game.to_move,
-
-              move: next.move,
-
-              algorithm: algorithmName(
-                  turnSettings,
-              ),
-
-              algorithmId:
-              turnSettings.algorithm,
-
-              config: {
-                ...turnSettings.config,
-              },
-
-              metrics: next.metrics,
-            }
-
-            setLogs((previous) => [
-              ...previous,
-              log,
-            ])
-
-            setGame({
-              board: next.board,
-              to_move: next.to_move,
-              winner: next.winner,
-            })
-          } catch (requestError) {
-            if (
-                !controller.signal.aborted
-            ) {
-              setError(
-                  requestError instanceof Error
-                      ? requestError.message
-                      : 'Không thể lấy nước đi từ backend.',
-              )
-            }
-          }
-        },
-        delay,
-    )
-
-    return () => {
-      window.clearTimeout(timer)
-      controller.abort()
-    }
-  }, [
-    aiTurn,
-    paused,
-    error,
-    game,
-    turnSettings,
-    delay,
-  ])
-
-  function reset() {
-    setStarted(false)
-    setPaused(false)
-
-    setGame(
-        initialGame(),
-    )
-
-    setLogs([])
-    setError('')
-  }
-
-  function startMatch() {
-    if (
-        started ||
-        connection !== 'online' ||
-        pending
-    ) {
-      return
-    }
-
-    setError('')
-    setPaused(false)
-    setStarted(true)
-  }
-
-  function updateSettings(
-      next: MatchSettingsValue,
-  ) {
-    if (started) {
-      setSettings((previous) => ({
-        ...previous,
-        delay: next.delay,
-      }))
-
-      return
-    }
-
-    setSettings(next)
-  }
-
-  function humanMove(
-      move: Move,
-  ) {
-    const [row, col] = move
-
-    if (
-        !started ||
-        paused ||
-        !isHuman(game.to_move) ||
-        game.winner !== null ||
-        game.board[row]?.[col] !== 0
-    ) {
-      return
-    }
-
-    const next =
-        play(game, move)
-
-    const log: MoveLog = {
-      player: game.to_move,
-
-      move,
-
-      algorithm: 'Người chơi',
-
-      algorithmId: 'human',
-    }
-
-    setLogs((previous) => [
-      ...previous,
-      log,
-    ])
-
-    setGame(next)
-  }
+  const match = useGame({
+    agents,
+    connection,
+  })
 
   return (
       <div className="min-h-screen bg-background">
@@ -378,7 +63,7 @@ function App() {
 
               <button
                   type="button"
-                  onClick={refresh}
+                  onClick={() => void refresh()}
                   aria-label="Kiểm tra kết nối backend"
                   className="flex items-center gap-2 rounded-md px-2 py-2 text-xs font-medium text-muted-foreground hover:bg-muted"
               >
@@ -425,47 +110,47 @@ function App() {
           <div className="grid items-start gap-5 lg:grid-cols-[290px_minmax(0,1fr)] xl:grid-cols-[290px_minmax(0,1fr)_310px]">
             {/* Left panel */}
             <MatchSettings
-                value={settings}
+                value={match.settings}
                 agents={agents}
                 connection={connection}
-                locked={started}
-                onChange={updateSettings}
-                onStart={startMatch}
-                onReset={reset}
+                locked={match.started}
+
+                onChange={match.updateSettings}
+                onStart={match.startMatch}
+                onReset={match.reset}
             />
 
             {/* Center panel */}
             <GameBoard
-                game={game}
-                playerNames={playerNames}
-                lastMove={
-                    latest?.move ?? null
-                }
-                started={started}
-                paused={paused}
-                aiTurn={aiTurn}
-                error={error}
-                onMove={humanMove}
-                onTogglePause={() =>
-                    setPaused(
-                        (previous) => !previous,
-                    )
-                }
-                onRetry={() =>
-                    setError('')
-                }
+                game={match.game}
+                playerNames={match.playerNames}
+                lastMove={match.lastMove}
+
+                started={match.started}
+                paused={match.paused}
+                aiTurn={match.aiTurn}
+
+                activity={match.activity}
+                canStep={match.canStep}
+                stepRequested={match.stepRequested}
+                error={match.error}
+
+                onMove={match.humanMove}
+                onTogglePause={match.togglePause}
+                onStep={match.step}
+                onRetry={match.retry}
             />
 
             {/* Right panel */}
             <div className="grid min-w-0 gap-5 lg:col-span-2 lg:grid-cols-2 xl:col-span-1 xl:grid-cols-1">
               <GameStatistics
-                  logs={logs}
-                  playerNames={playerNames}
+                  logs={match.logs}
+                  playerNames={match.playerNames}
               />
 
               <MoveHistory
-                  logs={logs}
-                  winner={game.winner}
+                  logs={match.logs}
+                  winner={match.game.winner}
               />
             </div>
           </div>

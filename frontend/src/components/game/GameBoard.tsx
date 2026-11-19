@@ -1,8 +1,11 @@
 import {
     Bot,
     Circle,
+    Clock3,
+    LoaderCircle,
     Pause,
     Play,
+    SkipForward,
     Trophy,
     X,
 } from 'lucide-react'
@@ -27,6 +30,10 @@ import {
     type Player,
 } from '@/lib/game'
 
+import type {
+    GameActivity,
+} from '@/hooks/useGame'
+
 interface PlayerCardProps {
     player: Player
     name: string
@@ -44,7 +51,10 @@ function PlayerCard({
         <div
             className={cn(
                 'flex min-w-0 items-center gap-3 rounded-lg border p-3 transition-colors',
-                isActive && 'border-slate-400 bg-slate-50',
+
+                isActive &&
+                'border-slate-400 bg-slate-50',
+
                 isWinner &&
                 'border-emerald-300 bg-emerald-50',
             )}
@@ -52,6 +62,7 @@ function PlayerCard({
             <div
                 className={cn(
                     'grid h-10 w-10 shrink-0 place-items-center rounded-lg',
+
                     player === 1
                         ? 'bg-blue-50 text-blue-700'
                         : 'bg-rose-50 text-rose-600',
@@ -60,7 +71,10 @@ function PlayerCard({
                 {player === 1 ? (
                     <X size={24} strokeWidth={2.8} />
                 ) : (
-                    <Circle size={22} strokeWidth={2.8} />
+                    <Circle
+                        size={22}
+                        strokeWidth={2.8}
+                    />
                 )}
             </div>
 
@@ -98,12 +112,19 @@ interface GameBoardProps {
     game: Game
     playerNames: Record<Player, string>
     lastMove: Move | null
+
     started: boolean
     paused: boolean
     aiTurn: boolean
+
+    activity: GameActivity
+    canStep: boolean
+    stepRequested: boolean
     error: string
+
     onMove: (move: Move) => void
     onTogglePause: () => void
+    onStep: () => void
     onRetry: () => void
 }
 
@@ -111,40 +132,73 @@ export function GameBoard({
                               game,
                               playerNames,
                               lastMove,
+
                               started,
                               paused,
                               aiTurn,
+
+                              activity,
+                              canStep,
+                              stepRequested,
                               error,
+
                               onMove,
                               onTogglePause,
+                              onStep,
                               onRetry,
                           }: GameBoardProps) {
-    const finished = game.winner !== null
+    const finished =
+        game.winner !== null
 
     const boardDisabled =
-        !started || paused || aiTurn || finished
+        !started ||
+        paused ||
+        aiTurn ||
+        finished
 
     const winLine =
         game.winner !== null &&
         game.winner !== 0 &&
         lastMove
-            ? winningLine(game.board, ...lastMove)
+            ? winningLine(
+                game.board,
+                ...lastMove,
+            )
             : []
 
     const winningCells = new Set(
-        winLine.map(([row, col]) => `${row},${col}`),
+        winLine.map(
+            ([row, col]) => `${row},${col}`,
+        ),
     )
 
-    const status =
-        game.winner === 0
-            ? 'Hòa'
-            : game.winner !== null
-                ? `${symbol(game.winner)} thắng`
-                : !started
-                    ? 'Chờ bắt đầu'
-                    : paused
-                        ? 'Tạm dừng'
-                        : `Lượt ${symbol(game.to_move)}`
+    function getStatus(): string {
+        if (game.winner === 0) {
+            return 'Hòa'
+        }
+
+        if (game.winner !== null) {
+            return `${symbol(game.winner)} thắng`
+        }
+
+        if (!started) {
+            return 'Chờ bắt đầu'
+        }
+
+        if (error) {
+            return 'Lỗi'
+        }
+
+        if (stepRequested) {
+            return 'Chạy từng bước'
+        }
+
+        if (paused) {
+            return 'Tạm dừng'
+        }
+
+        return `Lượt ${symbol(game.to_move)}`
+    }
 
     function renderMatchMessage() {
         if (error) {
@@ -172,19 +226,49 @@ export function GameBoard({
             return 'Cấu hình và bắt đầu trận đấu'
         }
 
+        if (activity === 'thinking') {
+            return (
+                <>
+                    <LoaderCircle
+                        size={18}
+                        className="animate-spin"
+                    />
+
+                    AI quân {symbol(game.to_move)}
+                    {' '}đang suy luận...
+                </>
+            )
+        }
+
+        if (
+            activity === 'waiting' ||
+            stepRequested
+        ) {
+            return (
+                <>
+                    <Clock3 size={18} />
+
+                    Đang chuẩn bị lượt máy...
+                </>
+            )
+        }
+
         if (paused) {
-            return 'Trận đấu đang tạm dừng'
+            return (
+                <>
+                    <Pause size={16} />
+
+                    Trận đấu đang tạm dừng
+                </>
+            )
         }
 
         if (aiTurn) {
             return (
                 <>
-                    <Bot
-                        size={18}
-                        className="animate-pulse"
-                    />
+                    <Bot size={18} />
 
-                    AI đang suy luận...
+                    Đến lượt máy
                 </>
             )
         }
@@ -194,9 +278,11 @@ export function GameBoard({
 
     return (
         <Card className="lab-panel min-w-0 overflow-hidden">
-            <CardHeader className="flex-row items-center justify-between space-y-0 border-b">
+            <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 border-b">
                 <div>
-                    <CardTitle>Ván đấu</CardTitle>
+                    <CardTitle>
+                        Ván đấu
+                    </CardTitle>
 
                     <p className="mt-1 text-xs text-muted-foreground">
                         5 quân liên tiếp để chiến thắng
@@ -205,27 +291,34 @@ export function GameBoard({
 
                 <Badge
                     className={cn(
-                        game.winner === 0
-                            ? 'bg-muted text-muted-foreground'
-                            : finished
-                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                                : paused
-                                    ? 'border-amber-200 bg-amber-50 text-amber-800'
-                                    : 'bg-background',
+                        'shrink-0',
+
+                        error
+                            ? 'border-red-200 bg-red-50 text-red-700'
+                            : game.winner === 0
+                                ? 'bg-muted text-muted-foreground'
+                                : finished
+                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                                    : stepRequested
+                                        ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                        : paused
+                                            ? 'border-amber-200 bg-amber-50 text-amber-800'
+                                            : 'bg-background',
                     )}
                 >
-                    {status}
+                    {getStatus()}
                 </Badge>
             </CardHeader>
 
             <CardContent className="pt-5">
+                {/* Player status */}
                 <div className="mb-5 grid grid-cols-2 gap-3">
                     <PlayerCard
                         player={1}
                         name={playerNames[1]}
                         isActive={
                             started &&
-                            !paused &&
+                            (!paused || stepRequested) &&
                             !finished &&
                             game.to_move === 1
                         }
@@ -237,7 +330,7 @@ export function GameBoard({
                         name={playerNames[2]}
                         isActive={
                             started &&
-                            !paused &&
+                            (!paused || stepRequested) &&
                             !finished &&
                             game.to_move === 2
                         }
@@ -245,6 +338,7 @@ export function GameBoard({
                     />
                 </div>
 
+                {/* Board */}
                 <div
                     className="mx-auto w-full max-w-[590px]"
                     role="group"
@@ -265,35 +359,45 @@ export function GameBoard({
                             ),
                         )}
 
-                        {game.board.map((row, rowIndex) => (
-                            <div
-                                key={rowIndex}
-                                className="contents"
-                            >
-                                <div className="pr-1">
-                                    {rowIndex}
-                                </div>
+                        {game.board.map(
+                            (row, rowIndex) => (
+                                <div
+                                    key={rowIndex}
+                                    className="contents"
+                                >
+                                    <div className="pr-1">
+                                        {rowIndex}
+                                    </div>
 
-                                {row.map((cell, colIndex) => (
-                                    <GameCell
-                                        key={colIndex}
-                                        row={rowIndex}
-                                        col={colIndex}
-                                        value={cell}
-                                        currentPlayer={game.to_move}
-                                        disabled={boardDisabled}
-                                        isLastMove={
-                                            lastMove?.[0] === rowIndex &&
-                                            lastMove?.[1] === colIndex
-                                        }
-                                        isWinningCell={winningCells.has(
-                                            `${rowIndex},${colIndex}`,
-                                        )}
-                                        onMove={onMove}
-                                    />
-                                ))}
-                            </div>
-                        ))}
+                                    {row.map(
+                                        (cell, colIndex) => (
+                                            <GameCell
+                                                key={colIndex}
+                                                row={rowIndex}
+                                                col={colIndex}
+                                                value={cell}
+                                                currentPlayer={
+                                                    game.to_move
+                                                }
+                                                disabled={
+                                                    boardDisabled
+                                                }
+                                                isLastMove={
+                                                    lastMove?.[0] === rowIndex &&
+                                                    lastMove?.[1] === colIndex
+                                                }
+                                                isWinningCell={
+                                                    winningCells.has(
+                                                        `${rowIndex},${colIndex}`,
+                                                    )
+                                                }
+                                                onMove={onMove}
+                                            />
+                                        ),
+                                    )}
+                                </div>
+                            ),
+                        )}
                     </div>
                 </div>
 
@@ -301,55 +405,104 @@ export function GameBoard({
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-[11px] text-muted-foreground">
                     <div className="flex items-center gap-1.5">
                         <span className="h-3 w-3 rounded-sm border bg-blue-50" />
+
                         Nước đi gần nhất
                     </div>
 
                     <div className="flex items-center gap-1.5">
                         <span className="h-3 w-3 rounded-sm border bg-emerald-100" />
+
                         Chuỗi chiến thắng
                     </div>
                 </div>
 
-                {/* Match controls */}
-                <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                {/* Match status */}
+                <div className="mt-5 space-y-3 border-t pt-4">
                     <div
                         aria-live="polite"
-                        className="flex items-center gap-2 text-sm text-muted-foreground"
+                        className="flex min-h-6 items-center gap-2 text-sm text-muted-foreground"
                     >
                         {renderMatchMessage()}
                     </div>
 
+                    {/* Match controls */}
                     {started && !finished && (
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={onTogglePause}
-                        >
-                            {paused ? (
-                                <Play size={14} />
-                            ) : (
-                                <Pause size={14} />
-                            )}
+                        <div className="flex flex-wrap gap-2">
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={stepRequested}
+                                onClick={onTogglePause}
+                            >
+                                {paused ? (
+                                    <Play size={15} />
+                                ) : (
+                                    <Pause size={15} />
+                                )}
 
-                            {paused ? 'Tiếp tục' : 'Tạm dừng'}
-                        </Button>
+                                {paused
+                                    ? 'Tiếp tục'
+                                    : 'Tạm dừng'}
+                            </Button>
+
+                            {paused && aiTurn && (
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={!canStep}
+                                    onClick={onStep}
+                                >
+                                    {stepRequested ? (
+                                        <LoaderCircle
+                                            size={15}
+                                            className="animate-spin"
+                                        />
+                                    ) : (
+                                        <SkipForward size={15} />
+                                    )}
+
+                                    {stepRequested
+                                        ? 'Đang xử lý'
+                                        : 'Đi một bước'}
+                                </Button>
+                            )}
+                        </div>
+                    )}
+
+                    {canStep && (
+                        <p className="text-xs leading-relaxed text-muted-foreground">
+                            Chọn Đi một bước để AI thực hiện
+                            đúng một nước đi rồi tiếp tục
+                            tạm dừng.
+                        </p>
                     )}
                 </div>
 
+                {/* Request error */}
                 {error && (
                     <div
                         role="alert"
                         className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
                     >
-                        {error}
+                        <p>
+                            {error}
+                        </p>
 
                         <button
                             type="button"
-                            className="ml-2 font-medium underline"
+                            className="mt-2 font-medium underline"
                             onClick={onRetry}
                         >
                             Thử lại
                         </button>
+
+                        {paused && (
+                            <p className="mt-2 text-xs">
+                                Sau khi xóa lỗi, chọn Tiếp tục
+                                hoặc Đi một bước để chạy lại
+                                lượt máy.
+                            </p>
+                        )}
                     </div>
                 )}
             </CardContent>
