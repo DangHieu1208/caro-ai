@@ -1,0 +1,3 @@
+# Thực nghiệm (chưa triển khai runner)
+
+Runner gọi trực tiếp `Agent.choose_move`, không gọi UI/HTTP. Sử dụng cùng `GameState`, cùng luật kết thúc, cấu hình đã chốt và seed được ghi theo ván/ply. Mỗi cấu hình tối thiểu 10 cặp đổi lượt; Random vs MiniMax, Random vs MCTS, MiniMax vs MCTS; khảo sát c {0.5,1,1.4,2} cố định iterations và iterations {100,300,500} cố định c. Chọn đối thủ đủ mạnh để tránh hiệu ứng 100% thắng; không thay đổi đối thủ trong cùng khảo sát. Dùng chung máy, Python, phiên bản commit, cách đo và báo cáo rõ ngân sách thời gian/độ sâu/iterations. Ghi CSV kết quả thực và log, tạo plot từ CSV. Không trộn số liệu của các prototype Python/JavaScript trước đó với kết quả bản tích hợp.
